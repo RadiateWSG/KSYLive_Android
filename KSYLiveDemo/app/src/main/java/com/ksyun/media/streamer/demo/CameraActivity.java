@@ -9,6 +9,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.hardware.Camera;
 import android.opengl.GLSurfaceView;
@@ -18,31 +19,47 @@ import android.os.Handler;
 import android.os.SystemClock;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
+import android.support.v7.widget.AppCompatSeekBar;
+import android.support.v7.widget.AppCompatSpinner;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.Chronometer;
 import android.widget.CompoundButton;
+import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.ksyun.media.player.IMediaPlayer;
 import com.ksyun.media.streamer.capture.camera.CameraTouchHelper;
 import com.ksyun.media.streamer.filter.audio.AudioFilterBase;
 import com.ksyun.media.streamer.filter.audio.AudioReverbFilter;
+import com.ksyun.media.streamer.filter.imgtex.ImgBeautyProFilter;
+import com.ksyun.media.streamer.filter.imgtex.ImgFilterBase;
 import com.ksyun.media.streamer.filter.imgtex.ImgTexFilter;
 import com.ksyun.media.streamer.filter.imgtex.ImgTexFilterBase;
 import com.ksyun.media.streamer.filter.imgtex.ImgTexFilterMgt;
+import com.ksyun.media.streamer.framework.AVConst;
 import com.ksyun.media.streamer.kit.KSYStreamer;
 import com.ksyun.media.streamer.kit.OnAudioRawDataListener;
 import com.ksyun.media.streamer.kit.OnPreviewFrameListener;
 import com.ksyun.media.streamer.kit.StreamerConstants;
 import com.ksyun.media.streamer.logstats.StatsLogReport;
-import com.ksyun.media.streamer.util.audio.KSYBgmPlayer;
+import com.ksyun.media.streamer.util.gles.GLRender;
 
+import java.io.BufferedOutputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
@@ -62,6 +79,8 @@ public class CameraActivity extends Activity implements
     private View mSwitchCameraView;
     private View mFlashView;
     private TextView mShootingText;
+    private TextView mRecordingText;
+    private TextView mCaptureSceenShot;
     private CheckBox mWaterMarkCheckBox;
     private CheckBox mBeautyCheckBox;
     private CheckBox mReverbCheckBox;
@@ -72,6 +91,18 @@ public class CameraActivity extends Activity implements
     private CheckBox mFrontMirrorCheckBox;
     private TextView mUrlTextView;
     private TextView mDebugInfoTextView;
+
+    private View mBeautyChooseView;
+    private AppCompatSpinner mBeautySpinner;
+    private LinearLayout mBeautyGrindLayout;
+    private TextView mGrindText;
+    private AppCompatSeekBar mGrindSeekBar;
+    private LinearLayout mBeautyWhitenLayout;
+    private TextView mWhitenText;
+    private AppCompatSeekBar mWhitenSeekBar;
+    private LinearLayout mBeautyRuddyLayout;
+    private TextView mRuddyText;
+    private AppCompatSeekBar mRuddySeekBar;
 
     private ButtonObserver mObserverButton;
     private CheckBoxObserver mCheckBoxObserver;
@@ -84,11 +115,13 @@ public class CameraActivity extends Activity implements
     private boolean mIsLandscape;
     private boolean mPrintDebugInfo = false;
     private boolean mRecording = false;
+    private boolean mIsFileRecording = false;
     private boolean isFlashOpened = false;
     private String mUrl;
     private String mDebugInfo = "";
     private String mBgmPath = "/sdcard/test.mp3";
     private String mLogoPath = "file:///sdcard/test.png";
+    private String mRecordUrl = "/sdcard/test.mp4";
 
     private boolean mHWEncoderUnsupported;
     private boolean mSWEncoderUnsupported;
@@ -96,6 +129,8 @@ public class CameraActivity extends Activity implements
     private final static int PERMISSION_REQUEST_CAMERA_AUDIOREC = 1;
     private static final String START_STRING = "开始直播";
     private static final String STOP_STRING = "停止直播";
+    private static final String START_RECORDING = "开始录制";
+    private static final String STOP_RECORDING = "停止录制";
 
     public final static String URL = "url";
     public final static String FRAME_RATE = "framerate";
@@ -103,7 +138,10 @@ public class CameraActivity extends Activity implements
     public final static String AUDIO_BITRATE = "audio_bitrate";
     public final static String VIDEO_RESOLUTION = "video_resolution";
     public final static String LANDSCAPE = "landscape";
-    public final static String ENCDODE_METHOD = "encode_method";
+    public final static String ENCODE_TYPE = "encode_type";
+    public final static String ENCODE_METHOD = "encode_method";
+    public final static String ENCODE_SCENE = "encode_scene";
+    public final static String ENCODE_PROFILE = "encode_profile";
     public final static String START_ATUO = "start_auto";
     public static final String SHOW_DEBUGINFO = "show_debuginfo";
 
@@ -111,8 +149,9 @@ public class CameraActivity extends Activity implements
                                      String rtmpUrl, int frameRate,
                                      int videoBitrate, int audioBitrate,
                                      int videoResolution, boolean isLandscape,
-                                     int encodeMethod, boolean startAuto,
-                                     boolean showDebugInfo) {
+                                     int encodeType, int encodeMethod,
+                                     int encodeScene, int encodeProfile,
+                                     boolean startAuto, boolean showDebugInfo) {
         Intent intent = new Intent(context, CameraActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra("type", fromType);
@@ -122,7 +161,10 @@ public class CameraActivity extends Activity implements
         intent.putExtra(AUDIO_BITRATE, audioBitrate);
         intent.putExtra(VIDEO_RESOLUTION, videoResolution);
         intent.putExtra(LANDSCAPE, isLandscape);
-        intent.putExtra(ENCDODE_METHOD, encodeMethod);
+        intent.putExtra(ENCODE_TYPE, encodeType);
+        intent.putExtra(ENCODE_METHOD, encodeMethod);
+        intent.putExtra(ENCODE_SCENE, encodeScene);
+        intent.putExtra(ENCODE_PROFILE, encodeProfile);
         intent.putExtra(START_ATUO, startAuto);
         intent.putExtra(SHOW_DEBUGINFO, showDebugInfo);
         context.startActivity(intent);
@@ -148,6 +190,10 @@ public class CameraActivity extends Activity implements
         mObserverButton = new ButtonObserver();
         mShootingText = (TextView) findViewById(R.id.click_to_shoot);
         mShootingText.setOnClickListener(mObserverButton);
+        mRecordingText = (TextView) findViewById(R.id.click_to_record);
+        mRecordingText.setOnClickListener(mObserverButton);
+        mCaptureSceenShot = (TextView) findViewById(R.id.click_to_capture_screenshot);
+        mCaptureSceenShot.setOnClickListener(mObserverButton);
         mDeleteView = findViewById(R.id.backoff);
         mDeleteView.setOnClickListener(mObserverButton);
         mSwitchCameraView = findViewById(R.id.switch_cam);
@@ -172,6 +218,18 @@ public class CameraActivity extends Activity implements
         mFrontMirrorCheckBox.setOnCheckedChangeListener(mCheckBoxObserver);
         mAudioOnlyCheckBox = (CheckBox) findViewById(R.id.audio_only);
         mAudioOnlyCheckBox.setOnCheckedChangeListener(mCheckBoxObserver);
+
+        mBeautyChooseView = findViewById(R.id.beauty_choose);
+        mBeautySpinner = (AppCompatSpinner) findViewById(R.id.beauty_spin);
+        mBeautyGrindLayout = (LinearLayout) findViewById(R.id.beauty_grind);
+        mGrindText = (TextView) findViewById(R.id.grind_text);
+        mGrindSeekBar = (AppCompatSeekBar) findViewById(R.id.grind_seek_bar);
+        mBeautyWhitenLayout = (LinearLayout) findViewById(R.id.beauty_whiten);
+        mWhitenText = (TextView) findViewById(R.id.whiten_text);
+        mWhitenSeekBar = (AppCompatSeekBar) findViewById(R.id.whiten_seek_bar);
+        mBeautyRuddyLayout = (LinearLayout) findViewById(R.id.beauty_ruddy);
+        mRuddyText = (TextView) findViewById(R.id.ruddy_text);
+        mRuddySeekBar = (AppCompatSeekBar) findViewById(R.id.ruddy_seek_bar);
 
         mMainHandler = new Handler();
         mStreamer = new KSYStreamer(this);
@@ -204,8 +262,17 @@ public class CameraActivity extends Activity implements
             mStreamer.setPreviewResolution(videoResolution);
             mStreamer.setTargetResolution(videoResolution);
 
-            int encode_method = bundle.getInt(ENCDODE_METHOD);
+            int encode_type = bundle.getInt(ENCODE_TYPE);
+            mStreamer.setVideoCodecId(encode_type);
+
+            int encode_method = bundle.getInt(ENCODE_METHOD);
             mStreamer.setEncodeMethod(encode_method);
+
+            int encodeScene = bundle.getInt(ENCODE_SCENE);
+            mStreamer.setVideoEncodeScene(encodeScene);
+
+            int encodeProfile = bundle.getInt(ENCODE_PROFILE);
+            mStreamer.setVideoEncodeProfile(encodeProfile);
 
             mIsLandscape = bundle.getBoolean(LANDSCAPE, false);
             mStreamer.setRotateDegrees(mIsLandscape ? 90 : 0);
@@ -219,8 +286,11 @@ public class CameraActivity extends Activity implements
             mPrintDebugInfo = bundle.getBoolean(SHOW_DEBUGINFO, false);
         }
         mStreamer.setDisplayPreview(mCameraPreviewView);
-        mStreamer.setEnableStreamStatModule(true);
-        mStreamer.enableDebugLog(true);
+        //if (mIsLandscape) {
+        //    mStreamer.setOffscreenPreview(1280, 720);
+        //} else {
+        //    mStreamer.setOffscreenPreview(720, 1280);
+        //}
         mStreamer.setFrontCameraMirror(mFrontMirrorCheckBox.isChecked());
         mStreamer.setMuteAudio(mMuteCheckBox.isChecked());
         mStreamer.setEnableAudioPreview(mAudioPreviewCheckBox.isChecked());
@@ -229,9 +299,12 @@ public class CameraActivity extends Activity implements
         mStreamer.setOnLogEventListener(mOnLogEventListener);
         //mStreamer.setOnAudioRawDataListener(mOnAudioRawDataListener);
         //mStreamer.setOnPreviewFrameListener(mOnPreviewFrameListener);
-        mStreamer.getImgTexFilterMgt().setFilter(mStreamer.getGLRender(),
-                ImgTexFilterMgt.KSY_FILTER_BEAUTY_DENOISE);
-        mStreamer.setEnableImgBufBeauty(true);
+
+        // set beauty filter
+        initBeautyUI();
+        if (mStreamer.getVideoEncodeMethod() == StreamerConstants.ENCODE_METHOD_SOFTWARE_COMPAT) {
+            mBeautyCheckBox.setChecked(true);
+        }
         mStreamer.getImgTexFilterMgt().setOnErrorListener(new ImgTexFilterBase.OnErrorListener() {
             @Override
             public void onError(ImgTexFilterBase filter, int errno) {
@@ -242,6 +315,11 @@ public class CameraActivity extends Activity implements
             }
         });
 
+        // add RGBA buffer filter to ImgTexFilterMgt, this would cause performance drop,
+        // only valid after Android 4.4
+        //RGBABufDemoFilter demoFilter = new RGBABufDemoFilter(mStreamer.getGLRender());
+        //mStreamer.getImgTexFilterMgt().setExtraFilter(demoFilter);
+
         // touch focus and zoom support
         CameraTouchHelper cameraTouchHelper = new CameraTouchHelper();
         cameraTouchHelper.setCameraCapture(mStreamer.getCameraCapture());
@@ -250,17 +328,111 @@ public class CameraActivity extends Activity implements
         cameraTouchHelper.setCameraHintView(mCameraHintView);
     }
 
+    private void initBeautyUI() {
+        String[] items =  new String[]{"DISABLE", "BEAUTY_SOFT", "SKIN_WHITEN", "BEAUTY_ILLUSION",
+                "BEAUTY_DENOISE", "BEAUTY_SMOOTH", "BEAUTY_PRO", "DEMO_FILTER", "GROUP_FILTER"};
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, items);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        mBeautySpinner.setAdapter(adapter);
+        mBeautySpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                TextView textView = ((TextView) parent.getChildAt(0));
+                if (textView != null) {
+                    textView.setTextColor(getResources().getColor(R.color.font_color_35));
+                }
+                if (position == 0) {
+                    mStreamer.getImgTexFilterMgt().setFilter((ImgFilterBase) null);
+                } else if (position <= 5) {
+                    mStreamer.getImgTexFilterMgt().setFilter(
+                            mStreamer.getGLRender(), position + 15);
+                } else if (position == 6) {
+                    mStreamer.getImgTexFilterMgt().setFilter(mStreamer.getGLRender(),
+                            ImgTexFilterMgt.KSY_FILTER_BEAUTY_PRO);
+                } else if (position == 7) {
+                    mStreamer.getImgTexFilterMgt().setFilter(
+                            new DemoFilter(mStreamer.getGLRender()));
+                } else if (position == 8) {
+                    List<ImgTexFilter> groupFilter = new LinkedList<>();
+                    groupFilter.add(new DemoFilter2(mStreamer.getGLRender()));
+                    groupFilter.add(new DemoFilter3(mStreamer.getGLRender()));
+                    groupFilter.add(new DemoFilter4(mStreamer.getGLRender()));
+                    mStreamer.getImgTexFilterMgt().setFilter(groupFilter);
+                }
+                List<ImgFilterBase> filters = mStreamer.getImgTexFilterMgt().getFilter();
+                if (filters != null && !filters.isEmpty()) {
+                    final ImgFilterBase filter = filters.get(0);
+                    mBeautyGrindLayout.setVisibility(filter.isGrindRatioSupported() ?
+                            View.VISIBLE : View.GONE);
+                    mBeautyWhitenLayout.setVisibility(filter.isWhitenRatioSupported() ?
+                            View.VISIBLE : View.GONE);
+                    mBeautyRuddyLayout.setVisibility(filter.isRuddyRatioSupported() ?
+                            View.VISIBLE : View.GONE);
+                    SeekBar.OnSeekBarChangeListener seekBarChangeListener =
+                            new SeekBar.OnSeekBarChangeListener() {
+                        @Override
+                        public void onProgressChanged(SeekBar seekBar, int progress,
+                                                      boolean fromUser) {
+                            if (!fromUser) {
+                                return;
+                            }
+                            float val = progress / 100.f;
+                            if (seekBar == mGrindSeekBar) {
+                                filter.setGrindRatio(val);
+                            } else if (seekBar == mWhitenSeekBar) {
+                                filter.setWhitenRatio(val);
+                            } else if (seekBar == mRuddySeekBar) {
+                                if (filter instanceof ImgBeautyProFilter) {
+                                    val = progress / 50.f - 1.0f;
+                                }
+                                filter.setRuddyRatio(val);
+                            }
+                        }
+
+                        @Override
+                        public void onStartTrackingTouch(SeekBar seekBar) {
+                        }
+
+                        @Override
+                        public void onStopTrackingTouch(SeekBar seekBar) {
+                        }
+                    };
+                    mGrindSeekBar.setOnSeekBarChangeListener(seekBarChangeListener);
+                    mWhitenSeekBar.setOnSeekBarChangeListener(seekBarChangeListener);
+                    mRuddySeekBar.setOnSeekBarChangeListener(seekBarChangeListener);
+                    mGrindSeekBar.setProgress((int)(filter.getGrindRatio() * 100));
+                    mWhitenSeekBar.setProgress((int)(filter.getWhitenRatio() * 100));
+                    int ruddyVal = (int)(filter.getRuddyRatio() * 100);
+                    if (filter instanceof ImgBeautyProFilter) {
+                        ruddyVal = (int)(filter.getRuddyRatio() * 50 + 50);
+                    }
+                    mRuddySeekBar.setProgress(ruddyVal);
+                } else {
+                    mBeautyGrindLayout.setVisibility(View.GONE);
+                    mBeautyWhitenLayout.setVisibility(View.GONE);
+                    mBeautyRuddyLayout.setVisibility(View.GONE);
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+                // do nothing
+            }
+        });
+        mBeautySpinner.setPopupBackgroundResource(R.color.transparent1);
+        mBeautySpinner.setSelection(4);
+    }
+
     @Override
     public void onResume() {
         super.onResume();
         startCameraPreviewWithPermCheck();
         mStreamer.onResume();
-        if (mStreamer.isRecording() && !mAudioOnlyCheckBox.isChecked()) {
-            mStreamer.setAudioOnly(false);
-        }
         if (mWaterMarkCheckBox.isChecked()) {
             showWaterMark();
         }
+        mCameraHintView.hideAll();
     }
 
     @Override
@@ -268,9 +440,6 @@ public class CameraActivity extends Activity implements
         super.onPause();
         mStreamer.onPause();
         mStreamer.stopCameraPreview();
-        if (mStreamer.isRecording() && !mAudioOnlyCheckBox.isChecked()) {
-            mStreamer.setAudioOnly(true);
-        }
         hideWaterMark();
     }
 
@@ -299,6 +468,7 @@ public class CameraActivity extends Activity implements
         return true;
     }
 
+    //start streaming
     private void startStream() {
         mStreamer.startStream();
         mShootingText.setText(STOP_STRING);
@@ -306,12 +476,36 @@ public class CameraActivity extends Activity implements
         mRecording = true;
     }
 
+    //start recording to a local file
+    private void startRecord() {
+        mStreamer.startRecord(mRecordUrl);
+        mRecordingText.setText(STOP_RECORDING);
+        mRecordingText.postInvalidate();
+        mIsFileRecording = true;
+    }
+
+    private void stopRecord() {
+        mStreamer.stopRecord();
+        mRecordingText.setText(START_RECORDING);
+        mRecordingText.postInvalidate();
+        mIsFileRecording = false;
+        stopChronometer();
+    }
+
+    private void stopChronometer() {
+        if (mRecording || mIsFileRecording) {
+            return;
+        }
+        mChronometer.setBase(SystemClock.elapsedRealtime());
+        mChronometer.stop();
+    }
+
     private void stopStream() {
         mStreamer.stopStream();
-        mChronometer.stop();
         mShootingText.setText(START_STRING);
         mShootingText.postInvalidate();
         mRecording = false;
+        stopChronometer();
     }
 
     private void beginInfoUploadTimer() {
@@ -343,17 +537,17 @@ public class CameraActivity extends Activity implements
                 mStreamer.getRtmpHostIP(), mStreamer.getDroppedFrameCount(),
                 mStreamer.getConnectTime(), mStreamer.getDnsParseTime(),
                 mStreamer.getUploadedKBytes(), mStreamer.getEncodedFrames(),
-                mStreamer.getCurrentUploadKBitrate(), mStreamer.getVersion());
+                mStreamer.getCurrentUploadKBitrate(), KSYStreamer.getVersion());
     }
 
     //show watermark in specific location
     private void showWaterMark() {
         if (!mIsLandscape) {
             mStreamer.showWaterMarkLogo(mLogoPath, 0.08f, 0.04f, 0.20f, 0, 0.8f);
-            mStreamer.showWaterMarkTime(0.03f, 0.01f, 0.35f, Color.RED, 1.0f);
+            mStreamer.showWaterMarkTime(0.03f, 0.01f, 0.35f, Color.WHITE, 1.0f);
         } else {
             mStreamer.showWaterMarkLogo(mLogoPath, 0.05f, 0.09f, 0, 0.20f, 0.8f);
-            mStreamer.showWaterMarkTime(0.01f, 0.03f, 0.22f, Color.RED, 1.0f);
+            mStreamer.showWaterMarkTime(0.01f, 0.03f, 0.22f, Color.WHITE, 1.0f);
         }
     }
 
@@ -423,6 +617,7 @@ public class CameraActivity extends Activity implements
             if (mHWEncoderUnsupported) {
                 mStreamer.setEncodeMethod(
                         StreamerConstants.ENCODE_METHOD_SOFTWARE_COMPAT);
+                onBeautyChecked(mBeautyCheckBox.isChecked());
                 Log.e(TAG, "Got SW encoder error, switch to SOFTWARE_COMPAT mode");
             } else {
                 mStreamer.setEncodeMethod(StreamerConstants.ENCODE_METHOD_HARDWARE);
@@ -533,7 +728,7 @@ public class CameraActivity extends Activity implements
         @Override
         public void onPreviewFrame(byte[] data, int width, int height, boolean isRecording) {
             Log.d(TAG, "onPreviewFrame data.length=" + data.length + " " +
-                    width + "x" + height + " isRecording=" + isRecording);
+                    width + "x" + height + " mRecording=" + isRecording);
         }
     };
 
@@ -580,38 +775,15 @@ public class CameraActivity extends Activity implements
         }
     }
 
-    private void showChooseFilter() {
-        AlertDialog alertDialog;
-        alertDialog = new AlertDialog.Builder(this)
-                .setTitle("请选择美颜滤镜")
-                .setSingleChoiceItems(
-                        new String[]{"BEAUTY_SOFT", "SKIN_WHITEN", "BEAUTY_ILLUSION", "DENOISE",
-                                "BEAUTY_SMOOTH", "DEMOFILTER", "GROUP_FILTER"}, -1,
-                        new DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(DialogInterface dialog, int which) {
-                                if (which < 5) {
-                                    mStreamer.getImgTexFilterMgt().setFilter(
-                                            mStreamer.getGLRender(), which + 16);
-                                } else if (which == 5) {
-                                    mStreamer.getImgTexFilterMgt().setFilter(
-                                            new DemoFilter(mStreamer.getGLRender()));
-                                } else if (which == 6) {
-                                    List<ImgTexFilter> groupFilter = new LinkedList<>();
-                                    groupFilter.add(new DemoFilter2(mStreamer.getGLRender()));
-                                    groupFilter.add(new DemoFilter3(mStreamer.getGLRender()));
-                                    groupFilter.add(new DemoFilter4(mStreamer.getGLRender()));
-                                    mStreamer.getImgTexFilterMgt().setFilter(groupFilter);
-                                }
-                                dialog.dismiss();
-                            }
-                        })
-                .create();
-        alertDialog.setCancelable(false);
-        alertDialog.show();
+    private void onRecordClick() {
+        if (mIsFileRecording) {
+            stopRecord();
+        } else {
+            startRecord();
+        }
     }
 
-    boolean[] mChooseFilter = {false, false};
+    private boolean[] mChooseFilter = {false, false};
 
     private void showChooseAudioFilter() {
         AlertDialog alertDialog;
@@ -655,19 +827,13 @@ public class CameraActivity extends Activity implements
     }
 
     private void onBeautyChecked(boolean isChecked) {
-        if (isChecked) {
-            if (mStreamer.getVideoEncodeMethod() ==
-                    StreamerConstants.ENCODE_METHOD_SOFTWARE_COMPAT) {
-                mStreamer.getImgTexFilterMgt().setFilter(mStreamer.getGLRender(),
-                        ImgTexFilterMgt.KSY_FILTER_BEAUTY_DENOISE);
-                mStreamer.setEnableImgBufBeauty(true);
-            } else {
-                showChooseFilter();
-            }
-        } else {
-            mStreamer.getImgTexFilterMgt().setFilter(mStreamer.getGLRender(),
+        if (mStreamer.getVideoEncodeMethod() == StreamerConstants.ENCODE_METHOD_SOFTWARE_COMPAT) {
+            mStreamer.getImgTexFilterMgt().setFilter(mStreamer.getGLRender(), isChecked ?
+                    ImgTexFilterMgt.KSY_FILTER_BEAUTY_DENOISE :
                     ImgTexFilterMgt.KSY_FILTER_BEAUTY_DISABLE);
-            mStreamer.setEnableImgBufBeauty(false);
+            mStreamer.setEnableImgBufBeauty(isChecked);
+        } else {
+            mBeautyChooseView.setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
         }
     }
 
@@ -677,24 +843,26 @@ public class CameraActivity extends Activity implements
 
     private void onBgmChecked(boolean isChecked) {
         if (isChecked) {
-            mStreamer.getAudioPlayerCapture().getBgmPlayer()
-                    .setOnCompletionListener(new KSYBgmPlayer.OnCompletionListener() {
+            // use KSYMediaPlayer instead of KSYBgmPlayer
+            mStreamer.getAudioPlayerCapture().setEnableMediaPlayer(true);
+            mStreamer.getAudioPlayerCapture().getMediaPlayer()
+                    .setOnCompletionListener(new IMediaPlayer.OnCompletionListener() {
                         @Override
-                        public void onCompletion(KSYBgmPlayer bgmPlayer) {
+                        public void onCompletion(IMediaPlayer iMediaPlayer) {
                             Log.d(TAG, "End of the currently playing music");
                         }
                     });
-            mStreamer.getAudioPlayerCapture().getBgmPlayer()
-                    .setOnErrorListener(new KSYBgmPlayer.OnErrorListener() {
+            mStreamer.getAudioPlayerCapture().getMediaPlayer()
+                    .setOnErrorListener(new IMediaPlayer.OnErrorListener() {
                         @Override
-                        public void onError(KSYBgmPlayer bgmPlayer, int what, int extra) {
-                            Log.e(TAG, "onBgmError: " + what);
+                        public boolean onError(IMediaPlayer iMediaPlayer, int what, int extra) {
+                            Log.e(TAG, "OnErrorListener, Error:" + what + ", extra:" + extra);
+                            return false;
                         }
                     });
-            mStreamer.getAudioPlayerCapture().getBgmPlayer().setVolume(1.0f);
-            mStreamer.getAudioPlayerCapture().getBgmPlayer().setMute(false);
+            mStreamer.setEnableAudioMix(true);
             mStreamer.startBgm(mBgmPath, true);
-            mStreamer.setHeadsetPlugged(true);
+            mStreamer.getAudioPlayerCapture().getMediaPlayer().setVolume(0.4f, 0.4f);
         } else {
             mStreamer.stopBgm();
         }
@@ -723,6 +891,39 @@ public class CameraActivity extends Activity implements
         mStreamer.setAudioOnly(isChecked);
     }
 
+    private void onCaptureScreenShotClick() {
+        mStreamer.requestScreenShot(new GLRender.ScreenShotListener() {
+            @Override
+            public void onBitmapAvailable(Bitmap bitmap) {
+                BufferedOutputStream bos = null;
+                try {
+                    Date date = new Date() ;
+                    SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy_MM_dd_HH_mm_ss") ;
+                    final String filename = "/sdcard/screenshot"+ dateFormat.format(date) + ".jpg";
+
+                    bos = new BufferedOutputStream(new FileOutputStream(filename));
+                    if (bitmap != null) {
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, bos);
+                        runOnUiThread(new Runnable() {
+                            public void run() {
+                                Toast.makeText(CameraActivity.this, "保存截图到 "+ filename,
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                    }
+                } catch (FileNotFoundException e) {
+                    e.printStackTrace();
+                } finally {
+                    if (bos != null) try {
+                        bos.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        });
+    }
+
     private class ButtonObserver implements View.OnClickListener {
         @Override
         public void onClick(View view) {
@@ -738,6 +939,12 @@ public class CameraActivity extends Activity implements
                     break;
                 case R.id.click_to_shoot:
                     onShootClick();
+                    break;
+                case R.id.click_to_record:
+                    onRecordClick();
+                    break;
+                case R.id.click_to_capture_screenshot:
+                    onCaptureScreenShotClick();
                     break;
                 default:
                     break;

@@ -4,6 +4,8 @@ KSYLive库融合了Android 播放和推流SDK。旨在提供业内一流的移�
 * [x]  美颜
 * [x] 美声
 * [x] 连麦互动
+* [x] 动态贴纸  
+* [x] 录屏  
 * [x] 秒开加速
 * [x] 低延时直播
 * [x] 弱网优化
@@ -45,9 +47,35 @@ KSYLive库融合了Android 播放和推流SDK。旨在提供业内一流的移�
 **推荐大家使用融合库！**
 
 ## 四、下载集成
-clone [github库](https://github.com/ksvc/KSYLive_Android)，使用github库中的demo和lib库。
 
-或者从oschina镜像下载，国内访问速度更快：https://git.oschina.net/ksvc/KSYLive_Android
+* 推荐直接使用gradle方式集成：
+
+``` gradle
+# required
+allprojects {
+    repositories {
+        jcenter()
+    }
+}
+
+dependencies {
+    # required, enough for most devices.
+    compile 'com.ksyun.media:libksylive-java:2.0.4'
+    compile 'com.ksyun.media:libksylive-armv7a:2.0.4'
+
+    # Other ABIs: optional
+    compile 'com.ksyun.media:libksylive-arm64:2.0.4'
+    compile 'com.ksyun.media:libksylive-x86:2.0.4'
+}
+```
+
+* clone [github库](https://github.com/ksvc/KSYLive_Android)，使用github库中的demo和lib库。
+
+* 或者从oschina镜像下载，国内访问速度更快：https://git.oschina.net/ksvc/KSYLive_Android
+
+## FAQ
+
+已知的问题可参见[FAQ](https://github.com/ksvc/KSYLive_Android/wiki/FAQ)
 
 ## 反馈与建议
 - 主页：[金山云](http://v.ksyun.com)
